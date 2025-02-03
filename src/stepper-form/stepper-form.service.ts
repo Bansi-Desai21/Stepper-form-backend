@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException ,InternalServerErrorException} from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument } from '../../schemas/user.schema';
@@ -7,15 +11,15 @@ import { ExperienceDetails } from '../../schemas/experience-details.schema';
 import { Types } from 'mongoose';
 import * as fs from 'fs';
 import * as path from 'path';
-
+import { URL } from 'url';
 @Injectable()
 export class StepperFormService {
   constructor(
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(EducationDetails.name)
-    private educationModel: Model<EducationDetails>,
+    private readonly educationModel: Model<EducationDetails>,
     @InjectModel(ExperienceDetails.name)
-    private experienceModel: Model<ExperienceDetails>,
+    private readonly experienceModel: Model<ExperienceDetails>,
   ) {}
 
   async createUserWithDetails(data: any) {
@@ -31,6 +35,9 @@ export class StepperFormService {
         profilePic,
         dateOfBirth,
       } = data.personalDetails;
+
+      data.educationDetails = this.fixJsonArray(data.educationDetails);
+      data.experienceDetails = this.fixJsonArray(data.experienceDetails);
 
       const user = await this.userModel.create({
         firstName,
@@ -50,12 +57,35 @@ export class StepperFormService {
       const userId = user._id as Types.ObjectId;
       await Promise.all([
         ...this.saveDetails(this.educationModel, data.educationDetails, userId),
-        ...this.saveDetails(this.experienceModel, data.experienceDetails, userId),
+        ...this.saveDetails(
+          this.experienceModel,
+          data.experienceDetails,
+          userId,
+        ),
       ]);
       return user;
     } catch (error) {
       console.error('Error creating user with details:', error);
       throw new Error('Failed to create user. Please try again later.');
+    }
+  }
+  private fixJsonArray(input) {
+    try {
+      let jsonArray = JSON.parse(input);
+      jsonArray = jsonArray.map((item) => {
+        if (typeof item === 'string') {
+          try {
+            return JSON.parse(item);
+          } catch (e) {
+            return item;
+          }
+        }
+        return item;
+      });
+
+      return JSON.stringify(jsonArray);
+    } catch (err) {
+      return 'Invalid JSON input';
     }
   }
 
@@ -69,13 +99,17 @@ export class StepperFormService {
 
   private saveDetails(model: any, details: string, userId: Types.ObjectId) {
     const parsedDetails = this.parseJson(details);
-    console.log('parsedDetails', parsedDetails);
-    return parsedDetails.map((detail: any) => new model({ ...detail, userId }).save());
+    return parsedDetails.map((detail: any) =>
+      new model({ ...detail, userId }).save(),
+    );
   }
 
   async getUserList() {
     try {
       const user = await this.userModel.aggregate([
+        {
+          $match: { isRemoved: false },
+        },
         {
           $lookup: {
             from: 'educationdetails',
@@ -105,12 +139,14 @@ export class StepperFormService {
       if (!Types.ObjectId.isValid(userId)) {
         throw new NotFoundException('Invalid user ID format');
       }
-  
-      const user = await this.userModel.findOne({ _id: new Types.ObjectId(userId) }).lean();
+
+      const user = await this.userModel
+        .findOne({ _id: new Types.ObjectId(userId) })
+        .lean();
       if (!user) {
         throw new NotFoundException('User not found');
       }
-  
+
       const [educationDetails, experienceDetails] = await Promise.all([
         this.educationModel.find({ userId: user._id }).lean(),
         this.experienceModel.find({ userId: user._id }).lean(),
@@ -152,14 +188,17 @@ export class StepperFormService {
       ) {
         this.deleteFile(existingUser.profilePic);
       }
-
+     
       if (
-        data.resume &&
+        data.professionalDetails.uploadedResume &&
         existingUser.professionalDetails.uploadedResume != '' &&
-        existingUser.professionalDetails.uploadedResume !== data.resume
+        existingUser.professionalDetails.uploadedResume !== data.professionalDetails.uploadedResume
       ) {
         this.deleteFile(existingUser.professionalDetails.uploadedResume);
       }
+
+      data.educationDetails = this.fixJsonArray(data.educationDetails);
+      data.experienceDetails = this.fixJsonArray(data.experienceDetails);
 
       const user = (await this.userModel.findByIdAndUpdate(
         userId,
@@ -191,8 +230,16 @@ export class StepperFormService {
 
       const userObjId = user._id as Types.ObjectId;
       await Promise.all([
-        ...this.saveDetails(this.educationModel, data.educationDetails, userObjId),
-        ...this.saveDetails(this.experienceModel, data.experienceDetails, userObjId),
+        ...this.saveDetails(
+          this.educationModel,
+          data.educationDetails,
+          userObjId,
+        ),
+        ...this.saveDetails(
+          this.experienceModel,
+          data.experienceDetails,
+          userObjId,
+        ),
       ]);
 
       return user;
@@ -204,34 +251,49 @@ export class StepperFormService {
 
   private deleteFile(fileUrl: string): void {
     try {
-      const filePath = path.join(
-        __dirname,
-        '../../uploads/',
-        path.basename(fileUrl),
-      );
-      if (fs.existsSync(filePath)) {
+      let relativePath = fileUrl;
+      
+      if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+        const urlObj = new URL(fileUrl);
+        relativePath = decodeURIComponent(urlObj.pathname); 
+        relativePath = relativePath.replace('/uploads', '');
+      }
+  
+      const filePath = path.join(process.cwd(), 'uploads', relativePath);
+      const directoryExists = fs.existsSync(path.dirname(filePath));
+    
+      if (directoryExists) {
         fs.unlinkSync(filePath);
-        console.log(`Deleted old file: ${filePath}`);
+      } else {
+        console.log('File does not exist at:', filePath);
       }
     } catch (err) {
       console.error(`Error deleting file: ${fileUrl}`, err);
     }
-  }
+  }  
 
   async deleteUserWithDetails(userId: string): Promise<User> {
-    try{
+    try {
       const user = await this.userModel.findById(userId);
 
       if (!user) throw new NotFoundException('User not found');
-  
-      await this.educationModel.deleteMany({ userId });
-      await this.experienceModel.deleteMany({ userId });
-  
-      return this.userModel.findByIdAndDelete(userId);
-    }catch(error){
+
+      await this.educationModel.updateMany(
+        { userId: new Types.ObjectId(userId) },
+        { $set: { isRemoved: true } },
+      );
+      await this.experienceModel.updateMany(
+        { userId: new Types.ObjectId(userId) },
+        { $set: { isRemoved: true } },
+      );
+
+      return this.userModel.findByIdAndUpdate(
+        { _id: new Types.ObjectId(userId) },
+        { $set: { isRemoved: true } },
+      );
+    } catch (error) {
       console.error('Error deleting user with details:', error);
       throw new Error('Failed to delete user. Please try again later.');
     }
-   
   }
 }
