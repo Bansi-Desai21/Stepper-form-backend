@@ -19,6 +19,9 @@ export class EducationDetails {
 
   @Prop()
   yearOfPassing: number;
+
+  @Prop({ default: false })
+  isRemoved:Boolean
 }
 
 export const EducationDetailsSchema = SchemaFactory.createForClass(EducationDetails);

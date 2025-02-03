@@ -19,6 +19,9 @@ export class ExperienceDetails {
 
   @Prop()
   lastCTC: number;
+
+  @Prop({ default: false })
+  isRemoved:Boolean
 }
 
 export const ExperienceDetailsSchema = SchemaFactory.createForClass(ExperienceDetails);

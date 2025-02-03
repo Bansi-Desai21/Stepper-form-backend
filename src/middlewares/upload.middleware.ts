@@ -2,12 +2,13 @@ import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import * as multer from 'multer';
 import { diskStorage } from 'multer';
+import * as path from 'path';
 
 @Injectable()
 export class UploadMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
     const storage = diskStorage({
-      destination: './uploads',
+      destination: path.join(process.cwd(), 'uploads'),
       filename: (req, file, callback) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
         callback(null, `${file.fieldname}-${uniqueSuffix}-${file.originalname}`);

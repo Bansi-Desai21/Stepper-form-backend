@@ -97,6 +97,9 @@ export class User {
 
   @Prop({ type: ProfessionalDetails })
   professionalDetails: ProfessionalDetails;
+
+  @Prop({ default: false })
+  isRemoved:Boolean
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
