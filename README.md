@@ -56,7 +56,3 @@ Access the API documentation via Swagger UI:
 - **MongoDB** (Database)
 - **Mongoose** (ORM for MongoDB)
 - **Swagger** (API documentation)
-
-
-
-
