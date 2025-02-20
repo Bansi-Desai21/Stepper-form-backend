@@ -1,31 +1,56 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
-import { Request, Response, NextFunction } from 'express';
-import * as multer from 'multer';
-import { diskStorage } from 'multer';
-import * as path from 'path';
+import { Injectable, NestMiddleware, Req } from "@nestjs/common";
+import { Response, NextFunction } from "express";
+import * as multer from "multer";
+import { memoryStorage } from "multer";
+import { CloudinaryService } from "../cloudinary/cloudinary.service";
 
 @Injectable()
 export class UploadMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: NextFunction) {
-    const storage = diskStorage({
-      destination: path.join(process.cwd(), 'uploads'),
-      filename: (req, file, callback) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        callback(null, `${file.fieldname}-${uniqueSuffix}-${file.originalname}`);
-      },
-    });
+  constructor(private readonly cloudinaryService: CloudinaryService) {}
 
-    const upload = multer({ storage }).fields([
-      { name: 'profilePic', maxCount: 1 },
-      { name: 'resume', maxCount: 1 },
+  use(@Req() req, res: Response, next: NextFunction) {
+    const upload = multer({ storage: memoryStorage() }).fields([
+      { name: "profilePic", maxCount: 1 },
+      { name: "resume", maxCount: 1 },
     ]);
 
-    upload(req, res, (err) => {
+    upload(req, res, async (err) => {
       if (err) {
-        console.error('File upload error:', err);
-        return res.status(500).json({ message: 'File upload failed', error: err });
+        console.error("File upload error:", err);
+        return res
+          .status(500)
+          .json({ message: "File upload failed", error: err });
       }
-      next();
+
+      if (!req.files) {
+        return next();
+      }
+
+      try {
+        const uploadedFiles = {};
+
+        if (req.files["profilePic"]) {
+          const profilePicResult = await this.cloudinaryService.uploadFile(
+            req.files["profilePic"][0]
+          );
+          uploadedFiles["profilePic"] = profilePicResult.secure_url;
+        }
+
+        if (req.files["resume"]) {
+          const resumeResult = await this.cloudinaryService.uploadFile(
+            req.files["resume"][0]
+          );
+          uploadedFiles["resume"] = resumeResult.secure_url;
+        }
+
+        req.body = { ...req.body, ...uploadedFiles };
+        next();
+      } catch (error) {
+        console.error("Cloudinary upload error:", error);
+        return res
+          .status(500)
+          .json({ message: "Cloudinary upload failed", error });
+      }
     });
   }
 }
